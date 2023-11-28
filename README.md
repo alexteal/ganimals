@@ -1,5 +1,3 @@
-# EVERYBODY DANCE NOW
-
 # GANimals
 
 A final project for the GANimals group
