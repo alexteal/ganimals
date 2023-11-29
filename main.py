@@ -45,7 +45,7 @@ from deit.models import deit_tiny_patch16_224
 
 from timm.data.constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 
-torch.set_grad_enabled(False)
+torch.set_grad_enabled(True)
 
 if torch.cuda.is_available():
     device = torch.device('cuda')
@@ -199,7 +199,7 @@ for param in last_layer.parameters():
     param.requires_grad = True
 
 criterion = nn.CrossEntropyLoss()
-# optimizer = torch.optim.AdamW(model.parameters(), lr=0.005 * (batch_size / 512), weight_decay=0.05)
+# optimizer = torch.optim.AdamW(model.parameters(), lr=0.0005 * (batch_size / 512), weight_decay=0.05)
 optimizer = torch.optim.SGD(model.parameters(), lr=0.0005 * (batch_size / 512), momentum=0.9, weight_decay=0.005)
 scheduler = CosineAnnealingLR(optimizer, T_max=15, eta_min=0)
 
