@@ -47,13 +47,13 @@ from timm.data.constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 
 torch.set_grad_enabled(True)
 
-if torch.cuda.is_available():
-    device = torch.device('cuda')
-    print('CUDA is available. Using GPU.')
-else:
-    device = torch.device('cpu')
-    print('CUDA is not available. Using CPU')
-
+# if torch.cuda.is_available():
+#     device = torch.device('cuda')
+#     print('CUDA is available. Using GPU.')
+# else:
+#     device = torch.device('cpu')
+#     print('CUDA is not available. Using CPU')
+print("Using CPU. CUDA might be available.")
 device = torch.device('cpu')
 # Read the ImageNet categories
 # with open("imagenet_classes.txt", "r") as f:
