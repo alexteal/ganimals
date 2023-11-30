@@ -31,8 +31,12 @@ import requests
 import matplotlib.pyplot as plt
 # %config InlineBackend.figure_format = 'retina'
 
+from SlantedTriangularLR import SlantedTriangularLR
+from pruning import run_pruning_tests
 import torch
 import timm
+import os
+import matplotlib.pyplot as plt
 import torchvision
 import torchvision.transforms as T
 import thop
@@ -47,14 +51,14 @@ from timm.data.constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 
 torch.set_grad_enabled(True)
 
-# if torch.cuda.is_available():
-#     device = torch.device('cuda')
-#     print('CUDA is available. Using GPU.')
-# else:
-#     device = torch.device('cpu')
-#     print('CUDA is not available. Using CPU')
-print("Using CPU. CUDA might be available.")
-device = torch.device('cpu')
+if torch.cuda.is_available():
+    device = torch.device('cuda')
+    print('CUDA is available. Using GPU.')
+else:
+    device = torch.device('cpu')
+    print('CUDA is not available. Using CPU')
+#print("Using CPU. CUDA might be available.")
+#device = torch.device('cpu')
 # Read the ImageNet categories
 # with open("imagenet_classes.txt", "r") as f:
 #     imagenet_categories = [s.strip() for s in f.readlines()]
@@ -147,13 +151,14 @@ batch_size = 1024
 train_loader = Data.DataLoader(dataset=train_data, batch_size=batch_size, shuffle=True)
 test_loader = Data.DataLoader(dataset=test_data, batch_size=batch_size, shuffle=False)
 
+
 """#This just changes the output head to fit the classification size for CIFAR10"""
 
 model.head = nn.Linear(model.embed_dim, 10)
 
 """#Seeding"""
 
-seed = 1738
+seed = 2014
 
 torch.manual_seed(seed)
 torch.cuda.manual_seed(seed)
@@ -185,60 +190,146 @@ def test(model=None, test_loader=None, epoch=None, step=None, loss=None):
             total += labels.size(0)
             correct += (predicted.argmax(dim=1) == labels).sum().item()
 
-    accuracy = correct / total
+    accuracy = 100 * (correct / total)
     print(
-        f"Epoch: {epoch + 1}, Step: {step + 1} :: Accuracy on CIFAR-10 test set: {accuracy:.2%}\tRunning Loss for this epoch: {loss:.3}")
+        f"Epoch: {epoch + 1}, Step: {step + 1} :: Accuracy on CIFAR-10 test set: {accuracy:.2f}%\tLoss for final batch in this epoch: {loss:.3}")
+    return accuracy
 
 
+def save_model(model, model_name, accuracy):
+
+    highest_accuracy = load_highest_accuracy()
+
+    # Only save the model if its accuracy is higher than the previous model's
+    if accuracy > highest_accuracy:
+
+        save_highest_accuracy(accuracy)
+
+        file_path = "./model/{}.pt".format(model_name)
+
+        print("New highest accuracy. Saving model ...")
+        print()
+
+        torch.save(model.state_dict(), file_path)
+        
+        
+def load_model(model=None, device="cuda"):
+    try:
+        model.load_state_dict(torch.load("./model/cifar10_deit_tiny_patch16_224.pt"))
+        device = torch.device(device)
+        model.to(device)
+        model.eval()
+        return model
+    except Exception as e:
+        print(f"Error loading the model: {str(e)}")
+        return None
+    
+    
+def load_highest_accuracy():
+    if os.path.exists("highest_accuracy.txt"):
+        with open("highest_accuracy.txt", "r") as f:
+            return float(f.read())
+    else:
+        return 0.0  # Default to 0.0 if the file doesn't exist
+    
+    
+def save_highest_accuracy(accuracy):
+    with open("highest_accuracy.txt", "w") as f:
+        f.write(str(accuracy))
+
+        
+def plot_accuracy(train_list, test_list):
+    epoch_list = [1, 2, 3, 4, 5]
+    plt.plot(epoch_list, train_list, label="Training Accuracy", color="blue")
+    plt.plot(epoch_list, test_list, label="Testing Accuracy", color="orange")
+
+    plt.xlabel("Epoch")
+    plt.ylabel("Accuracy")
+    plt.title("Accuracies At the End of Each Epoch")
+    plt.legend()
+    plt.savefig('accuracy_plot.png')
+    
+    
 """#Training block"""
-
-for param in model.parameters():
-    param.requires_grad = False
-last_layer = list(model.children())[-1]
-for param in last_layer.parameters():
-    param.requires_grad = True
-
-criterion = nn.CrossEntropyLoss()
-# optimizer = torch.optim.AdamW(model.parameters(), lr=0.0005 * (batch_size / 512), weight_decay=0.05)
-optimizer = torch.optim.SGD(model.parameters(), lr=0.0005 * (batch_size / 512), momentum=0.9, weight_decay=0.005)
-scheduler = CosineAnnealingLR(optimizer, T_max=15, eta_min=0)
+train_list = []
+test_list = []
+    
+# save_dir = "model"
+# model_name = "cifar10_deit_tiny_patch16_224"
 
 
-model.to(device)
+def train(save_dir="model",
+          model_name="cifar10_deit_tiny_patch16_224"): 
+    
+    if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
 
-num_epochs = 10
-for epoch in range(num_epochs):
-    print(f"Epoch {epoch}")
-    running_loss = 0.0
-    for i, data in enumerate(train_loader):
-        model.train()
-        inputs, labels = data[0].to(device), data[1].to(device)
+    for param in model.parameters():
+        param.requires_grad = False
+    last_layer = list(model.children())[-1]
+    for param in last_layer.parameters():
+        param.requires_grad = True
 
-        train_correct = 0
-        train_total = 0
+        
+    num_epochs = 5
+    criterion = nn.CrossEntropyLoss()
+    # optimizer = torch.optim.AdamW(model.parameters(), lr=0.0005 * (batch_size / 512), weight_decay=0.05)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.0005 * (batch_size / 512), momentum=0.9, weight_decay=0.005)
+    scheduler = CosineAnnealingLR(optimizer, T_max=15, eta_min=0)
+#     scheduler = SlantedTriangularLR(optimizer, 0.2, 8, 1 * 0.0005 * (batch_size / 512), len(train_loader) * num_epochs)
 
-        inputs.requires_grad_()
-        optimizer.zero_grad()
-        outputs = model(inputs)
+    model.to(device)
 
-        train_total += labels.size(0)
-        train_correct = (outputs.argmax(dim=1) == labels).sum().item()
-        train_acc = train_correct / train_total
+    for epoch in range(num_epochs):
+        print(f"Epoch {epoch+1}")
+        for i, data in enumerate(train_loader):
+            batch_loss = 0.0
+            model.train()
+            inputs, labels = data[0].to(device), data[1].to(device)
 
-        print(f"Batch accuracy on training data: {train_acc:.2%}")
+            train_correct = 0
+            train_total = 0
 
-        loss = criterion(outputs, labels)
-        loss.requires_grad_()
-        loss.backward()
-        optimizer.step()
+            inputs.requires_grad_()
+            optimizer.zero_grad()
+            outputs = model(inputs)
 
-        running_loss += loss.item()
+            train_total += labels.size(0)
+            train_correct = (outputs.argmax(dim=1) == labels).sum().item()
+            train_acc = train_correct / train_total
 
-        if i % 100 == 99:
-            print()
-            test(model=model, test_loader=test_loader, epoch=epoch, step=i, loss=running_loss)
-            print()
-    scheduler.step()
-    running_loss = 0.0
+            print(f"Batch accuracy on training data: {train_acc:.2%}")
 
-print("Training finished")
+            train_acc = 100 * train_acc
+            loss = criterion(outputs, labels)
+            loss.requires_grad_()
+            loss.backward()
+            optimizer.step()
+            scheduler.step()
+
+            if i % 5 == 0:
+                batch_loss += loss.item()
+                print()
+                accuracy = test(model=model, test_loader=test_loader, epoch=epoch, step=i, loss=batch_loss)
+                print()
+                save_model(model, model_name, accuracy)
+                
+            if i == 48:
+                train_list.append(train_acc)
+                test_list.append(accuracy)
+
+
+    print("Training finished")
+    
+'''
+print()
+print("Training with STLR")
+print()
+train()    
+plot_accuracy(train_list, test_list)
+
+'''
+print()
+print("Now testing out pruning")
+prune_amounts = [0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5]
+run_pruning_tests(model, test_loader, prune_amounts, device)
