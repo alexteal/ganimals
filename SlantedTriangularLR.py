@@ -18,17 +18,20 @@ class SlantedTriangularLR:
         self.lr_max = lr_max
         self.total_iterations = total_num_steps
         self.cut = int(self.total_iterations * cut_frac)
+        self.current_iteration = 0
 
-    def step(self, current_iteration):
-        p = current_iteration / self.total_iterations
-        if current_iteration < self.cut:
+    def step(self):
+        self.current_iteration += 1
+
+        p = self.current_iteration / self.total_iterations
+        if self.current_iteration < self.cut:
             lr = self.lr_max * p
         else:
-            lr = self.lr_max * (1 + (self.cut - current_iteration) / (self.total_iterations - self.cut) * (
+            lr = self.lr_max * (1 + (self.cut - self.current_iteration) / (self.total_iterations - self.cut) * (
                     self.ratio - 1)) / self.ratio
 
         for param_group in self.optimizer.param_groups:
             param_group['lr'] = lr
 
-        if current_iteration % 10 == 0:
-            print(f"Learning rate at step {current_iteration}: {lr}")
+        if self.current_iteration % 10 == 0:
+            print(f"Learning rate at step {self.current_iteration}: {lr}")
