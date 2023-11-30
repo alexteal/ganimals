@@ -1,7 +1,11 @@
+# CHANGES FROM PREVIOUS VERSION:
+# FOR INPUT LIST USE [0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5]
+# ADDED "N" KWARG. IF THIS RUNS TOO SLOW, DECREASE IT. IF IT RUNS TOO FAST, INCREASE IT. HIGHER N MORE ACCURATE RESULTS
+
 # you should "pip install pandas" or whatever pip/conda/idk
 # main command is run_pruning_tests(model, test_loader, prune_amounts)
 # prune amounts is a list of floats from 0 to 1
-# you should just do [0.0, 0.1, 0.2, 0.3, 0.4, 0.5]
+# you should just do [0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5]
 # test loader should be a data loader for test or validation set
 # if it takes too long ask me or chatgpt how to shorten the data loader
 # it also takes a device parameter but it defaults to cuda so u dont need to specify it
@@ -10,7 +14,7 @@
 # from pruning import run_pruning_tests
 
 
-import time
+# import time
 
 # import datasets
 import pandas as pd
@@ -23,10 +27,11 @@ from torch.nn.utils import prune
 # from torch.utils.data import DataLoader, random_split
 # from deit.models import deit_tiny_patch16_224
 # from timm.data.constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
-# from datasets import load_dataset
+# from datasets import load_dataset, Dataset
+# import onnxruntime as ort
 
 
-def test(model=None, test_loader=None, device='cuda'):
+def test(model=None, test_loader=None, device=None):
     model.eval()
     model.to(device)
 
@@ -35,10 +40,7 @@ def test(model=None, test_loader=None, device='cuda'):
     with torch.no_grad():
         # print size of test loader
         print(len(test_loader))
-        i = 0
         for images, labels in test_loader:
-            if i % 1000 == 0:
-                print(f"Batch {i + 1} of {len(test_loader)}")
             images = images.to(device)  # Send images to the appropriate device (CPU/GPU)
             labels = labels.to(device)
 
@@ -50,10 +52,7 @@ def test(model=None, test_loader=None, device='cuda'):
             total += labels.size(0)
             correct += (predicted.argmax(dim=1) == labels).sum().item()
 
-            i += 1
-
     accuracy = correct / total
-    print(f"Accuracy on test set: {accuracy:.2%}")
     return accuracy
 
 
@@ -95,53 +94,64 @@ def prune_model(model, amount=0.1):
     # Prune the qkv and proj layers in the Attention module
     for block in model.blocks:
         prune.l1_unstructured(block.attn.qkv, name='weight', amount=amount)
+        prune.remove(block.attn.qkv, 'weight')
         prune.l1_unstructured(block.attn.proj, name='weight', amount=amount)
+        prune.remove(block.attn.proj, 'weight')
 
     # Prune the fc1 and fc2 layers in the Mlp module
     for block in model.blocks:
         prune.l1_unstructured(block.mlp.fc1, name='weight', amount=amount)
+        prune.remove(block.mlp.fc1, 'weight')
         prune.l1_unstructured(block.mlp.fc2, name='weight', amount=amount)
+        prune.remove(block.mlp.fc2, 'weight')
 
     return model
 
 
-def run_pruning_tests(model, test_loader, prune_amounts, device='cuda'):
+def run_pruning_tests(model, test_loader, prune_amounts, device, n=10):
     if not torch.is_grad_enabled():
         torch.set_grad_enabled(True)
-
+    model.to(device)
     macs, params = get_macs_and_params(device, model)
 
     macs, params = clever_format([macs, params], "%.3f")
-    print(f"MACs: {macs}, Parameters: {params}")
 
     results = []
 
     for amount in prune_amounts:
         pruned_model = prune_model(model, amount=amount)
 
-        start_time = time.time()
-        accuracy = test(model=pruned_model, test_loader=test_loader)
-        inference_time = time.time() - start_time
+        accuracy = 0
+        # start_time = time.time()
+        for _ in range(n):
+            accuracy += test(model=pruned_model, test_loader=test_loader, device=device)
+        accuracy /= n
+
+        # inference_time = (time.time() - start_time) / n
 
         # Calculate the number of parameters
-        # params = sum(p.numel() for p in pruned_model.parameters() if p.requires_grad)
+        nonzero_params = 0
+        for param in model.parameters():
+            if param.requires_grad:
+                nonzero_params += torch.count_nonzero(param).item()
 
-        ratio = inference_time / accuracy if accuracy > 0 else float('inf')
+        # ta_ratio = accuracy / inference_time if inference_time > 0 else float('inf')
 
-        macs, params = get_macs_and_params(device, pruned_model)
+        # macs, params = get_macs_and_params(device, pruned_model)
 
         results.append({
             'Prune Amount': amount,
-            'Inference Time': inference_time,
+            # 'Inference Time': inference_time,
             'Accuracy': accuracy,
-            'Time/Accuracy Ratio': ratio,
-            'MACs': macs,
-            'Params': params
+            'Params': nonzero_params,
+            # 'Time/Accuracy Ratio': ta_ratio,
+            'Accuracy/Param Ratio': accuracy / nonzero_params
         })
 
     # Assemble the table
     results_df = pd.DataFrame(results)
-    print(results_df)
+    with pd.option_context('display.max_columns', None):
+        print(results_df)
 
 
 # if torch.cuda.is_available():
@@ -157,8 +167,9 @@ def run_pruning_tests(model, test_loader, prune_amounts, device='cuda'):
 #     T.ToTensor(),
 #     T.Normalize(IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD),
 # ])
-# imagenet_val = load_dataset("imagenet-1k", split=datasets.Split.VALIDATION)
-#
+
+# imagenet_val = load_dataset("imagenet-1k", split="validation[:10%]", cache_dir="D:/cache")
+
 # fraction = 0.1
 #
 # subset_length = int(len(imagenet_val) * fraction)
@@ -168,12 +179,15 @@ def run_pruning_tests(model, test_loader, prune_amounts, device='cuda'):
 # subset, _ = random_split(imagenet_val, [subset_length, remaining_length])
 #
 # test_loader = DataLoader(subset, batch_size=1, shuffle=False, collate_fn=collate_fn)
-#
+
+# test_loader = DataLoader(imagenet_val, batch_size=64, shuffle=False, collate_fn=collate_fn)
+
 # model = deit_tiny_patch16_224(pretrained=True)
 # model.eval()
 # model = model.to(device)
 # model.head = nn.Linear(model.embed_dim, 10)
-#
-# prune_amounts = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5]
-#
-# run_pruning_tests(model, test_loader, prune_amounts)
+
+# prune_amounts = [0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5]
+# prune_amounts = [0.0, 0.1, 0.25,  0.4, 0.55]
+# prune_amounts = [0.0, 0.1, 0.4]
+# run_pruning_tests(model, test_loader, prune_amounts, device)
