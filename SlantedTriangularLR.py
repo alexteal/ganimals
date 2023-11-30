@@ -7,7 +7,7 @@
 # ratio is the ratio of the minimum learning rate to the maximum learning rate
 # if your highest learning rate (lr_max) is 0.001 and your ratio is 32, your lowest learning rate will be 0.001/32
 # hi Jack here's what i recommend for the initialization:
-# scheduler = SlantedTriangularLR(optimizer, cut_frac = 0.1, 32,
+# scheduler = SlantedTriangularLR(optimizer, 0.1, 32,
 #          2 * 0.0005 * (batch_size / 512), len(train_loader) * num_epochs)
 #          [or however else you can calculate total number of steps]
 class SlantedTriangularLR:
@@ -29,3 +29,6 @@ class SlantedTriangularLR:
 
         for param_group in self.optimizer.param_groups:
             param_group['lr'] = lr
+
+        if current_iteration % 10 == 0:
+            print(f"Learning rate at step {current_iteration}: {lr}")
