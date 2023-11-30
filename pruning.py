@@ -1,6 +1,7 @@
 # CHANGES FROM PREVIOUS VERSION:
 # FOR INPUT LIST USE [0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5]
 # ADDED "N" KWARG. IF THIS RUNS TOO SLOW, DECREASE IT. IF IT RUNS TOO FAST, INCREASE IT. HIGHER N MORE ACCURATE RESULTS
+import time
 
 # you should "pip install pandas" or whatever pip/conda/idk
 # main command is run_pruning_tests(model, test_loader, prune_amounts)
@@ -24,6 +25,8 @@ import torch
 from thop import profile, clever_format
 # import torch.nn as nn
 from torch.nn.utils import prune
+
+
 # from torch.utils.data import DataLoader, random_split
 # from deit.models import deit_tiny_patch16_224
 # from timm.data.constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
@@ -118,16 +121,15 @@ def run_pruning_tests(model, test_loader, prune_amounts, device, n=10):
 
     results = []
 
+    i = 0
     for amount in prune_amounts:
+        start_time = time.time()
         pruned_model = prune_model(model, amount=amount)
 
         accuracy = 0
-        # start_time = time.time()
         for _ in range(n):
             accuracy += test(model=pruned_model, test_loader=test_loader, device=device)
         accuracy /= n
-
-        # inference_time = (time.time() - start_time) / n
 
         # Calculate the number of parameters
         nonzero_params = 0
@@ -147,12 +149,15 @@ def run_pruning_tests(model, test_loader, prune_amounts, device, n=10):
             # 'Time/Accuracy Ratio': ta_ratio,
             'Accuracy/Param Ratio': accuracy / nonzero_params
         })
+        time_taken = time.time() - start_time
+        print(
+            f"Step {i + 1} / {len(prune_amounts)}, Prune Amount: {amount}, Accuracy: {accuracy}, Time Taken: {time_taken}")
+        i += 1
 
     # Assemble the table
     results_df = pd.DataFrame(results)
     with pd.option_context('display.max_columns', None):
         print(results_df)
-
 
 # if torch.cuda.is_available():
 #     device = torch.device('cuda')
