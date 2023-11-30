@@ -23,13 +23,12 @@ class SlantedTriangularLR:
     def step(self):
         self.current_iteration += 1
 
-        p = self.current_iteration / self.total_iterations
         if self.current_iteration < self.cut:
+            p = self.current_iteration / self.cut
             lr = self.lr_max * p
         else:
-            lr = self.lr_max * (1 + (self.cut - self.current_iteration) / (self.total_iterations - self.cut) * (
-                    self.ratio - 1)) / self.ratio
-
+            p = (self.current_iteration - self.cut) / (self.total_iterations - self.cut)
+            lr = self.lr_max * (1 - p) + (self.lr_max / self.ratio) * p
         for param_group in self.optimizer.param_groups:
             param_group['lr'] = lr
 
