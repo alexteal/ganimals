@@ -114,6 +114,10 @@ def prune_model(model, amount=0.1):
 def run_pruning_tests(model, test_loader, prune_amounts, device, n=10):
     if not torch.is_grad_enabled():
         torch.set_grad_enabled(True)
+
+    for param in model.parameters():
+        param.requires_grad = True
+
     model.to(device)
     macs, params = get_macs_and_params(device, model)
 
